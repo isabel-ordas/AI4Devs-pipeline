@@ -1,0 +1,57 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  backend-ci-cd:
+    runs-on: ubuntu-latest
+    environment: PROD
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+
+    - name: Install backend dependencies
+      run: |
+        cd backend
+        npm ci
+
+    - name: Run backend tests
+      run: |
+        cd backend
+        npm test
+
+    - name: Build backend
+      run: |
+        cd backend
+        npm run build
+    
+    - name: Install SSH Key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.EC2_PRIVATE_KEY }}
+        known_hosts: ${{ secrets.EC2_HOST }}
+        if_key_exists: replace
+
+    - name: Adding Known Hosts
+      run: ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Deploy to EC2
+      uses: easingthemes/ssh-deploy@main
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
+        REMOTE_HOST: ${{ secrets.EC2_HOST }}
+        REMOTE_USER: ${{ secrets.EC2_USER }}
+        SOURCE: "backend/dist/"
+        TARGET: "/home/${{ secrets.EC2_USER }}/app"
+        SCRIPT_AFTER: |
+          cd /home/${{ secrets.EC2_USER }}/app
+          npm install --production
+          pm2 restart app || pm2 start index.js --name app
